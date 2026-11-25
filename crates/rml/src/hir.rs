@@ -19,6 +19,39 @@ pub struct Crate {
     pub top_mod: Mod,
     pub types: Vec<HirIdTypeMapping>,
     pub adts: Vec<DefIdAdtMapping>,
+    pub resolutions: Vec<ResolutionMapping>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Code {
+    def_id: DefId,
+    code: String,
+}
+
+impl From<(DefId, String)> for Code {
+    fn from(value: (DefId, String)) -> Self {
+        Self {
+            def_id: value.0,
+            code: value.1,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ResolutionMapping {
+    hir_id: HirId,
+    def_kind: DefKind,
+    def_id: Option<DefId>,
+}
+
+impl From<(HirId, (DefKind, Option<DefId>))> for ResolutionMapping {
+    fn from(value: (HirId, (DefKind, Option<DefId>))) -> Self {
+        Self {
+            hir_id: value.0,
+            def_kind: value.1.0,
+            def_id: value.1.1,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

@@ -27,13 +27,15 @@ pub fn convert(tcx: TyCtxt<'_>) -> Crate {
         *smap.borrow_mut() = Some(SpecMap::new(tcx, &collect_hir_specs(tcx)));
         let m = tcx.hir_root_module();
         let top_mod = m.hir_into(tcx);
-        let (types, adts) = extract_extra_info(&top_mod, tcx);
+        let (types, adts, res) = extract_extra_info(&top_mod, tcx);
         let types = types.into_iter().map(Into::into).collect();
         let adts = adts.into_iter().map(Into::into).collect();
+        let resolutions = res.into_iter().map(Into::into).collect();
         Crate {
             top_mod,
             types,
             adts,
+            resolutions,
         }
     })
 }

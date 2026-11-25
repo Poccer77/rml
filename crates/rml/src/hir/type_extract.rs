@@ -1,26 +1,22 @@
 use std::collections::{HashMap, HashSet};
-
+use rustc_span::def_id::LocalDefId;
 use rustc_hir::BodyId;
-use rustc_middle::ty::TyCtxt;
-
-use super::{
-    HirId, ItemKind, Mod, OwnerId, Ty,
-    pat::PatKind,
-    visit::{Visit, visit_body, visit_expr, visit_item_kind, visit_pat},
-};
+use rustc_middle::ty::{Instance, InstanceKind, TyCtxt, TypingEnv};
+use super::{pat::PatKind, visit::{Visit, visit_body, visit_expr, visit_item_kind, visit_pat}, HirId, ItemKind, Mod, OwnerId, Ty, CrateNum, DefIndex};
 use crate::{
     HirInto,
     hir::{
         DefId,
         ty::AdtDef,
         visit::{visit_anon_const, visit_closure, visit_const_arg},
+        DefKind,
     },
 };
 
-pub fn extract_extra_info(m: &Mod, tcx: TyCtxt) -> (HashMap<HirId, Ty>, HashMap<DefId, AdtDef>) {
+pub fn extract_extra_info(m: &Mod, tcx: TyCtxt) -> (HashMap<HirId, Ty>, HashMap<DefId, AdtDef>, HashMap<HirId, (DefKind, Option<DefId>)>) {
     let mut c = Collector::new(tcx);
     c.visit_mod(m);
-    (c.ty_map, c.adt_map)
+    (c.ty_map, c.adt_map, c.res_ids)
 }
 
 struct Collector<'tcx> {
@@ -29,6 +25,7 @@ struct Collector<'tcx> {
     body_ids: Vec<BodyId>,
     tcx: TyCtxt<'tcx>,
     hir_ids: HashSet<HirId>,
+    res_ids: HashMap<HirId, (DefKind, Option<DefId>)>,
 }
 
 impl<'tcx> Collector<'tcx> {
@@ -39,6 +36,7 @@ impl<'tcx> Collector<'tcx> {
             adt_map: Default::default(),
             hir_ids: Default::default(),
             body_ids: Vec::with_capacity(2),
+            res_ids: Default::default(),
         }
     }
 
@@ -72,8 +70,34 @@ impl<'a, 'tcx> Visit<'a> for Collector<'tcx> {
         visit_body(self, body);
 
         let owner: OwnerId = id.hir_id.owner.into();
-
         let res = self.tcx.typeck_body(id);
+        let sess = (*self.tcx).sess.source_map();
+
+        for (lid, def_res) in res.type_dependent_defs().items_in_stable_order() {
+            if let Ok((kind, did)) = def_res {
+                let args = self.tcx.erase_regions(res.node_args(rustc_hir::HirId {
+                    owner: id.hir_id.owner,
+                    local_id: lid,
+                }));
+                let ty_env = TypingEnv::post_analysis(self.tcx, id.hir_id.owner);
+
+                let hir_id = HirId {
+                    owner: owner.clone(),
+                    local_id: lid.into(),
+                };
+
+                let inst = match Instance::try_resolve(self.tcx, ty_env, *did, args) {
+                    Ok(Some(inst)) => match inst.def {
+                        InstanceKind::Item(def_id) => Some(def_id), // impl method or default
+                        // method
+                        _ => None, // Virtual (dyn), shims, etc.
+                    },
+                    _ => None, // unresolvable (generic Self) or error
+                };
+                self.res_ids
+                    .insert(hir_id.into(), (kind.into(), inst.map(|d| (&d).into())));
+            }
+        }
 
         for (lid, ty) in res.node_types().items_in_stable_order() {
             let hir_id = HirId {
